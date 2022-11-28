@@ -4,7 +4,7 @@ const path = require("path")
 
 const express = require("express");
 const ws = require("express-ws");
-const pty = require("node-pty");
+const { spawn } = require('node:child_process');
 const e = require("express");
 
 const app = express();
@@ -32,11 +32,12 @@ class Terminal{
     Terminal.debugInfo = debugInfo
     if (Terminal.isDebug()) {
       const debugCommand = Terminal.getDebugCommand()
-      Terminal.shell = pty.spawn("python3", ["-m", "pdb", ...debugCommand, "myfile.py"], { name: "xterm-color" });
+      Terminal.shell = spawn("python3", ["-m", "pdb", ...debugCommand, "myfile.py"], { name: "xterm-color" });
     }
     else {
-      Terminal.shell = pty.spawn(`python3`, ["-m", "myfile"], { name: "xterm-color" });
+      Terminal.shell = spawn(`python3`, ["-m", "myfile"]);
     }
+    Terminal.shell.stdin.setEncoding('utf-8');
   }
 
   static getDebugCommand() {
@@ -44,12 +45,13 @@ class Terminal{
       let command = []
       command = lines.reduce((command, line) => command.concat(['-c', `b ${line}`]), [])
       command = command.concat(["-c", "c"])
+      console.log(command.join(" "))
       return command
     }
 
   static async kill() {
     if (Terminal.shell) {
-      Terminal.shell.kill()
+      Terminal.shell.kill('SIGINT')
     }
     Terminal.shell = null;
     Terminal.code = ""
@@ -68,22 +70,22 @@ class Terminal{
   }
 
   static stepOver() {
-    Terminal.shell.write("n\n")
+    Terminal.shell.stdin.write("n\n");
     Terminal.debugInfo.lastAction = "step-over"
   }
 
   static stepInto() {
-    Terminal.shell.write("s\n")
+    Terminal.shell.stdin.write("s\n");
     Terminal.debugInfo.lastAction = "step-into"
   }
 
   static stepOut() {
-    Terminal.shell.write("r\n")
+    Terminal.shell.stdin.write("r\n");
     Terminal.debugInfo.lastAction = "step-out"
   }
 
   static continue() {
-    Terminal.shell.write("c\n")
+    Terminal.shell.stdin.write("c\n");
     Terminal.debugInfo.lastAction = "continue"
   }
 
@@ -93,6 +95,10 @@ const sendSocketMessage = (ws, data) => {
   if (ws.readyState === 1) {
     ws.send(data)
   }
+}
+
+const getStrFromBytes = (bytes) => {
+  return new Buffer.from(bytes).toString()
 }
 
 app.get("/", (req, res) => {
@@ -111,13 +117,19 @@ app.ws("/ws", (ws) => {
     else if (action === "run") {
       let {code} = payload
       await Terminal.init(code)
-      Terminal.shell.on("data", (data) => {
+      Terminal.shell.stdout.on("data", (data) => {
         try {
-          sendSocketMessage(ws, JSON.stringify({action: "run-result", payload: {data}}))
+          sendSocketMessage(ws, JSON.stringify({action: "run-result", payload: {data: getStrFromBytes(data)}}))
+        }
+        catch (err) {console.error(err)}
+      })
+      Terminal.shell.stderr.on("data", (data) => {
+        try {
+          sendSocketMessage(ws, JSON.stringify({action: "run-result", payload: {data: getStrFromBytes(data)}}))
         }
         catch (err) {console.error(err)}
       })    
-      Terminal.shell.on("exit", (data) => {
+      Terminal.shell.on("close", () => {
         sendSocketMessage(ws, JSON.stringify({action: "close"}))
         Terminal.kill()
       })      
@@ -125,14 +137,21 @@ app.ws("/ws", (ws) => {
     else if (action === "debug") {
       let {code, debugInfo} = payload
       await Terminal.init(code, debugInfo)
-      Terminal.shell.on("data", (data) => {
+      Terminal.shell.stdout.on("data", (data) => {
+        data = getStrFromBytes(data)
         try {
-          console.log(data)
           sendSocketMessage(ws, JSON.stringify({action: "debug-result", payload: {data}})) 
         }
         catch (err) {console.error(err)}
       })    
-      Terminal.shell.on("exit", (data) => {
+      Terminal.shell.stderr.on("data", (data) => {
+        data = getStrFromBytes(data)
+        try {
+          sendSocketMessage(ws, JSON.stringify({action: "debug-result", payload: {data}})) 
+        }
+        catch (err) {console.error(err)}
+      })    
+      Terminal.shell.on("close", (data) => {
         sendSocketMessage(ws, JSON.stringify({action: "close"}))
         Terminal.kill()
       })      
@@ -158,4 +177,4 @@ app.ws("/ws", (ws) => {
 // Prevent malformed packets from crashing server.
 expressWs.getWss().on("connection", (ws) => ws.on("error", console.error));
 
-app.listen(parseInt(3000), "0.0.0.0");
+app.listen(parseInt(4200), "0.0.0.0");

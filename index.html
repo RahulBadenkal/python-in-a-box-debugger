@@ -50,7 +50,7 @@
       );
       mode = "run"
       this.setExecutionStatus(false)
-      document.getElementById("ide").value = "print('1st line')\nprint('2nd line')\nprint('3rd Line')\nprint('4th Line')\nprint('5th Line')"
+      document.getElementById("ide").value = "print('1st line')\nprint('2nd line')\nprint('3rd Line')\nprint(1/0)\nprint('4th Line')\nprint('5th Line')"
       document.getElementById("debug-lines").value = "3"
 
       socket.onmessage = (event) => {
@@ -124,6 +124,7 @@
         this.isExecuting = value
         if (value) {
           document.getElementById("ide").readOnly = true
+          document.getElementById("console").readOnly = true
           if (this.mode === "run") {
             document.getElementById("run").innerHTML = "Running..."
           }
@@ -131,7 +132,7 @@
             document.getElementById("debug").innerHTML = "Debugging..."
             document.getElementById("debug-controls").innerHTML = `
               <button onclick='stepOver()'>Step over</button>
-              <button onclick=stepIn()'>Step in</button>
+              <button onclick='stepInto()'>Step in</button>
               <button onclick='stepOut()'>Step out</button>
               <button onclick='continueExecution()'>Resume</button>
             `
@@ -141,6 +142,7 @@
           document.getElementById("stop").style.visibility = "visible"
         }
         else {
+          document.getElementById("ide").readOnly = false
           document.getElementById("console").readOnly = false
           document.getElementById("run").disabled = false;
           document.getElementById("debug").disabled = false;
